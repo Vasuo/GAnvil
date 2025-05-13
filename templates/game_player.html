@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Player</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        canvas {
+            display: block;
+            background-color: white;
+        }
+        
+        #controls-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+        
+        #active-keys {
+            display: flex;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        
+        .key {
+            padding: 5px 10px;
+            background-color: #e0e0e0;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        
+        .key.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        
+        #game-state {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 300px;
+            max-height: 80vh;
+            overflow-y: auto;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        
+        <div id="controls-panel">
+            <div>Активные клавиши:</div>
+            <div id="active-keys"></div>
+            <div>Статус: <span id="connection-status">Отключен</span></div>
+        </div>
+        
+        <div id="game-state">
+            <h3>Состояние игры:</h3>
+            <div id="state-content">Ожидание данных...</div>
+        </div>
+    </div>
+
+    <script>
+        // Инициализация
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const playerName = '{{name}}';
+        const hostName = '{{host}}';
+        const activeKeysDisplay = document.getElementById('active-keys');
+        const connectionStatus = document.getElementById('connection-status');
+        const stateContent = document.getElementById('state-content');
+        
+        // Состояние игры
+        let gameState = {
+            host: hostName,
+            state: {}
+        };
+        
+        // Активные клавиши
+        const activeKeys = new Set();
+        
+        // Настройка canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        
+        // Socket.IO подключение
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
+        
+        // Обработчики соединения
+        socket.on('connect', () => {
+            connectionStatus.textContent = "Подключен";
+            connectionStatus.style.color = "green";
+            console.log('Connected to server as', playerName);
+        });
+        
+        socket.on('disconnect', () => {
+            connectionStatus.textContent = "Отключен";
+            connectionStatus.style.color = "red";
+            console.log('Disconnected from server');
+        });
+        
+        // Обработчики клавиатуры
+        document.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                if (!activeKeys.has(e.key)) {
+                    activeKeys.add(e.key);
+                    updateKeysDisplay();
+                    sendKeysToServer();
+                }
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+                activeKeys.delete(e.key);
+                updateKeysDisplay();
+                sendKeysToServer();
+            }
+        });
+        
+        // Обновление отображения активных клавиш
+        function updateKeysDisplay() {
+            activeKeysDisplay.innerHTML = '';
+            activeKeys.forEach(key => {
+                const keyElement = document.createElement('div');
+                keyElement.className = 'key active';
+                keyElement.textContent = key.replace('Arrow', '');
+                activeKeysDisplay.appendChild(keyElement);
+            });
+        }
+        
+        // Отправка клавиш на сервер
+        function sendKeysToServer() {
+            const keysArray = Array.from(activeKeys);
+            socket.emit('player_input', {
+                name: playerName,
+                keys: keysArray
+            });
+        }
+        
+        // Обработчик обновления состояния игры
+        socket.on('players_draw', (data) => {
+            if (data.host === hostName) {
+                gameState = data;
+                renderGameState();
+                updateGameDisplay();
+            }
+        });
+        
+        // Отображение состояния игры в текстовом виде
+        function renderGameState() {
+            stateContent.textContent = JSON.stringify(gameState, null, 2);
+        }
+        
+        // Отрисовка игрового состояния на canvas
+        function updateGameDisplay() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Отрисовка всех игроков
+            Object.entries(gameState.state).forEach(([name, player]) => {
+                // Рисуем игрока
+                ctx.fillStyle = player.color || '#4CAF50';
+                ctx.fillRect(player.x, player.y, player.size || 30, player.size || 30);
+                
+                // Подпись с именем
+                ctx.fillStyle = '#000';
+                ctx.font = '14px Arial';
+                ctx.fillText(name, player.x, player.y - 10);
+            });
+        }
+        
+        // Обработчик закрытия страницы
+        window.addEventListener('beforeunload', () => {
+            socket.emit('player_disconnected', { name: playerName });
+        });
+        
+        // Начальная отрисовка
+        updateGameDisplay();
+    </script>
+</body>
+</html>

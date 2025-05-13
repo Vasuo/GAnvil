@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+    <style>
+        .registration-container {
+            max-width: 500px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 15px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .registration-title {
+            color: #FF3A3A;
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-size: 2.5rem;
+        }
+        
+        .form-control {
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            border: 2px solid #e0e0e0;
+            transition: all 0.3s;
+        }
+        
+        .form-control:focus {
+            border-color: #A2FF86;
+            box-shadow: 0 0 0 0.25rem rgba(162, 255, 134, 0.25);
+        }
+        
+        .btn-register {
+            background-color: #FF3A3A;
+            border: none;
+            padding: 0.75rem;
+            font-weight: 600;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .btn-register:hover {
+            background-color: #E60000;
+            transform: translateY(-2px);
+        }
+        
+        .form-label {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .alert-danger {
+            background-color: rgba(255, 58, 58, 0.1);
+            border-color: rgba(255, 58, 58, 0.3);
+            color: #FF3A3A;
+        }
+        
+        .login-link {
+            text-align: center;
+            margin-top: 1.5rem;
+            color: #666;
+        }
+        
+        .login-link a {
+            color: #FF3A3A;
+            font-weight: 600;
+        }
+    </style>
+
+    <div class="main-content">
+        <div class="registration-container">
+            <h2 class="registration-title">Регистрация</h2>
+            <form method="POST" action="">
+                {{ form.hidden_tag() }}
+                
+                <div class="form-group mb-3">
+                    {{ form.username.label(class="form-label") }}
+                    {{ form.username(class="form-control", placeholder="Придумайте логин") }}
+                    {% if form.username.errors %}
+                        <div class="alert alert-danger mt-2">
+                            {% for error in form.username.errors %}
+                                <span>{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="form-group mb-3">
+                    {{ form.email.label(class="form-label") }}
+                    {{ form.email(class="form-control", placeholder="example@email.com") }}
+                    {% if form.email.errors %}
+                        <div class="alert alert-danger mt-2">
+                            {% for error in form.email.errors %}
+                                <span>{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="form-group mb-3">
+                    {{ form.password.label(class="form-label") }}
+                    {{ form.password(class="form-control", placeholder="Не менее 6 символов") }}
+                    {% if form.password.errors %}
+                        <div class="alert alert-danger mt-2">
+                            {% for error in form.password.errors %}
+                                <span>{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="form-group mb-3">
+                    {{ form.confirm_password.label(class="form-label") }}
+                    {{ form.confirm_password(class="form-control", placeholder="Повторите пароль") }}
+                    {% if form.confirm_password.errors %}
+                        <div class="alert alert-danger mt-2">
+                            {% for error in form.confirm_password.errors %}
+                                <span>{{ error }}</span>
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="form-group mt-4">
+                    {{ form.submit(class="btn btn-register w-100") }}
+                </div>
+                
+                <div class="login-link">
+                    Уже есть аккаунт? <a href="{{ url_for('login') }}">Войти</a>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}

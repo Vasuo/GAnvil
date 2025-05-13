@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="main-content">
+    <div class="container">
+        <!-- Карусель Bootstrap для сессий -->
+        <div id="sessionsCarousel" class="carousel slide" data-bs-ride="carousel">
+            <!-- Индикаторы -->
+            <div class="carousel-indicators">
+                {% for session in sessions %}
+                <button type="button" data-bs-target="#sessionsCarousel" data-bs-slide-to="{{ loop.index0 }}" 
+                    {% if loop.first %}class="active"{% endif %}></button>
+                {% endfor %}
+            </div>
+            
+            <!-- Слайды -->
+            <div class="carousel-inner rounded-4">
+                {% for session in sessions %}
+                <div class="carousel-item {% if loop.first %}active{% endif %}">
+                    <img src="https://i.pinimg.com/originals/c5/4e/af/c54eaf7088673e24b96b3fcc32a5af81.png" 
+                         class="d-block w-100" 
+                         alt="{{ session.host }}'s session">
+                    <div class="carousel-caption d-flex flex-column justify-content-center h-100">
+                        <div class="caption-backdrop mx-auto">
+                            <h3 class="carousel-title text-center">{{ session.game }}</h3>
+                            <p class="carousel-text text-center">
+                                <strong>Хост:</strong> {{session.host}}<br>
+                                <strong>Игроки:</strong> {{ session.players.replace('%', ', ') }}<br>
+                                <strong></strong> {{ session.description }}<br>
+                                {% if session.active == 'T' %}
+                                    <strong>ИДЁТ</strong><br>
+                                {% else %}
+                                    <strong>ПЛАНИРУЕТСЯ</strong><br>
+                                {% endif %}
+                                <strong>В игре:</strong> {{ session.active_players.replace('%', ', ') }}<br>
+                            </p>
+                            <div class="text-center">
+                                {% if session.host == current_user.username %}
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-start" onclick="startSession({{ session.id }})">
+                                            Начать
+                                        </button>
+                                        <button class="btn btn-danger" onclick="deleteSession({{ session.id }})">
+                                            Удалить
+                                        </button>
+                                    </div>
+                                {% else %}
+                                    {% if session.active == 'F' %}
+                                        <button class="btn btn-join" onclick="joinSession({{ session.id }})">
+                                            Присоединиться
+                                        </button>
+                                    {% else %}
+                                        <button class="btn btn-join" onclick="joinSession({{ session.id }})">
+                                            Подключиться
+                                        </button>
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <!-- Кнопки управления -->
+            <button class="carousel-control-prev" type="button" data-bs-target="#sessionsCarousel" data-bs-slide="prev">
+                <span class="carousel-control-prev-icon"></span>
+            </button>
+            <button class="carousel-control-next" type="button" data-bs-target="#sessionsCarousel" data-bs-slide="next">
+                <span class="carousel-control-next-icon"></span>
+            </button>
+        </div>
+
+        <!-- Кнопки навигации -->
+        <div class="text-center mt-5">
+            <a href="{{ url_for('gallery') }}" class="btn btn-workshop">
+                Галерея
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ms-2">
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                    <polyline points="13 2 13 9 20 9"></polyline>
+                </svg>
+            </a>
+            <a href="{{ url_for('workshop') }}" class="btn btn-workshop">
+                Мастерская
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ms-2">
+                    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                    <polyline points="13 2 13 9 20 9"></polyline>
+                </svg>
+            </a>
+        </div>
+    
+    <div class="main-content">
+        <div class="corner-buttons">
+            <a href="{{ url_for('gallery') }}" class="corner-link">Галерея</a>
+            <a href="{{ url_for('logout') }}" class="corner-link">Выйти</a>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Общие стили карусели */
+    .carousel {
+        max-width: 1200px;
+        margin: 0 auto;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    
+    .carousel-inner {
+        overflow: hidden;
+        border-radius: 16px;
+        height: 500px;
+    }
+    
+    .carousel-item {
+        height: 100%;
+    }
+    
+    .carousel-item img {
+        height: 100%;
+        width: 100%;
+        object-fit: cover;
+        filter: brightness(0.7);
+    }
+    
+    /* Стили подписей с размытым фоном */
+    .carousel-caption {
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .caption-backdrop {
+        background-color: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        max-width: 800px;
+        width: 100%;
+    }
+    
+    .carousel-title {
+        font-size: 3rem;
+        font-weight: 800;
+        color: #FF3A3A;
+        margin-bottom: 1rem;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    }
+    
+    .carousel-text {
+        font-size: 1.5rem;
+        margin-bottom: 2rem;
+        color: white;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+    }
+    
+    /* Кнопки */
+    .btn-join {
+        background-color: #A2FF86;
+        color: #1a1a1a;
+        border: none;
+        padding: 0.75rem 2rem;
+        font-weight: 600;
+        border-radius: 50px;
+        transition: all 0.3s;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-start {
+        background-color: #4A90E2;
+        color: white;
+        border: none;
+        padding: 0.75rem 2rem;
+        font-weight: 600;
+        border-radius: 50px;
+        transition: all 0.3s;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-danger {
+        background-color: #dc3545;
+        color: white;
+        border: none;
+        padding: 0.75rem 2rem;
+        font-weight: 600;
+        border-radius: 50px;
+        transition: all 0.3s;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-group {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+    }
+    
+    .btn-join:hover {
+        background-color: #8CFF66;
+        transform: translateY(-3px);
+    }
+    
+    .btn-start:hover {
+        background-color: #3a7bc8;
+        transform: translateY(-3px);
+    }
+    
+    .btn-danger:hover {
+        background-color: #bb2d3b;
+        transform: translateY(-3px);
+    }
+    
+    .btn-workshop {
+        background-color: #FF3A3A;
+        color: white;
+        border: none;
+        padding: 1rem 3rem;
+        font-size: 1.5rem;
+        font-weight: 700;
+        border-radius: 50px;
+        transition: all 0.3s;
+        display: inline-flex;
+        align-items: center;
+        box-shadow: 0 4px 15px rgba(255, 58, 58, 0.3);
+        margin: 0 10px;
+    }
+    
+    .btn-workshop:hover {
+        background-color: #E60000;
+        transform: translateY(-3px);
+    }
+    
+    /* Адаптивность */
+    @media (max-width: 768px) {
+        .carousel-inner {
+            height: 400px;
+        }
+        
+        .carousel-title {
+            font-size: 2rem;
+        }
+        
+        .carousel-text {
+            font-size: 1.2rem;
+        }
+        
+        .btn-workshop {
+            padding: 0.8rem 2rem;
+            font-size: 1.2rem;
+            margin-bottom: 10px;
+        }
+        
+        .caption-backdrop {
+            padding: 1.5rem;
+            max-width: 90%;
+        }
+        
+        .btn-group {
+            flex-direction: column;
+            align-items: center;
+        }
+    }
+
+    .corner-buttons {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        display: flex;
+        gap: 12px;
+        z-index: 1000;
+    }
+
+    .corner-link {
+        padding: 0.4rem 0.8rem;
+        font-size: 0.85rem;
+        font-weight: 500;
+        border-radius: 20px;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        background-color: #FF3A3A;
+        color: white;
+        border: none;
+    }
+
+    .corner-link:last-child {
+        background-color: white;
+        color: #1A1A1A;
+        border: 2px solid #1A1A1A;
+    }
+
+    .corner-link:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        opacity: 0.9;
+    }
+
+    .corner-link:last-child:hover {
+        background-color: #f0f0f0;
+    }
+</style>
+
+<script>
+function joinSession(sessionId) {
+    window.location.href = `/join_session/${sessionId}`;
+}
+
+function startSession(sessionId) {
+    window.location.href = `/start_session/${sessionId}`;
+}
+
+function deleteSession(sessionId) {
+    if (confirm('Вы уверены, что хотите удалить эту сессию?')) {
+        fetch(`/delete_session/${sessionId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+        .then(response => {
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                alert('Ошибка при удалении сессии');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ошибка при удалении сессии');
+        });
+    }
+}
+</script>
+{% endblock %}

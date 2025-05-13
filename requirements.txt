@@ -1,0 +1,8 @@
+Flask
+Flask-SQLAlchemy
+Flask-Login
+Flask-WTF
+bcrypt
+email_validator
+eventlet
+flask_socketio

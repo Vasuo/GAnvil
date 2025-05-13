@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+    <div class="main-content">
+        <h1 class="main-title">GAnvil</h1>
+        <div class="main-buttons">
+            <a href="{{ url_for('login') }}" class="btn btn-custom btn-login">Войти</a>
+            <a href="{{ url_for('register') }}" class="btn btn-custom btn-register">Регистрация</a>
+        </div>
+    </div>
+{% endblock %}

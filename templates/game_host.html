@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Убеги от квадрата</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+            background-color: white;
+        }
+        #message-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 24px;
+            display: none;
+            z-index: 100;
+            text-align: center;
+        }
+        #control-panel-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 101;
+        }
+        #control-panel {
+            position: fixed;
+            top: 0;
+            right: -300px;
+            width: 300px;
+            height: 100vh;
+            background-color: white;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            transition: right 0.3s ease;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 100;
+            overflow-y: auto;
+        }
+        #control-panel.active {
+            right: 0;
+        }
+        .speed-control {
+            margin-bottom: 15px;
+        }
+        .speed-control label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .speed-control input {
+            width: 100%;
+        }
+        .player-speed-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .close-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="message-display"></div>
+    
+    <button id="control-panel-btn">☰ Настройки</button>
+    
+    <div id="control-panel">
+        <button class="close-panel">×</button>
+        <h2>Управление скоростью</h2>
+        <div id="speed-controls">
+            <!-- Здесь будут добавляться элементы управления для каждого игрока -->
+        </div>
+    </div>
+
+    <script>
+        const username = "{{ current_user.username if current_user.is_authenticated else 'Guest' }}";
+    </script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <script>
+        // Инициализация canvas
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageDisplay = document.getElementById('message-display');
+        
+        // Элементы управления
+        const controlPanelBtn = document.getElementById('control-panel-btn');
+        const controlPanel = document.getElementById('control-panel');
+        const closePanelBtn = document.querySelector('.close-panel');
+        const speedControlsContainer = document.getElementById('speed-controls');
+
+        // Установка размеров canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Состояние игры
+        let gameRunning = true;
+        let startTime = Date.now();
+        let socket;
+        let serverConnected = false;
+        let keys = {};
+        let isPageClosing = false;
+
+        let gameState = [];
+
+        // Игровые объекты
+        const players = {
+            [username]: {
+                x: 100,
+                y: 100,
+                size: Math.min(30, window.innerWidth/20),
+                speed: 8,
+                color: '#4CAF50',
+                keys: []
+            }
+        };
+
+        // Управление панелью настроек
+        controlPanelBtn.addEventListener('click', () => {
+            controlPanel.classList.add('active');
+        });
+
+        closePanelBtn.addEventListener('click', () => {
+            controlPanel.classList.remove('active');
+        });
+
+        // Функция для обновления элементов управления скоростью
+        function updateSpeedControls() {
+            speedControlsContainer.innerHTML = '';
+            
+            Object.entries(players).forEach(([name, player]) => {
+                const playerItem = document.createElement('div');
+                playerItem.className = 'player-speed-item';
+                playerItem.innerHTML = `
+                    <div class="speed-control">
+                        <label for="speed-${name}">${name}: ${player.speed}</label>
+                        <input type="range" id="speed-${name}" min="1" max="20" value="${player.speed}" 
+                               data-player="${name}">
+                    </div>
+                `;
+                speedControlsContainer.appendChild(playerItem);
+                
+                // Добавляем обработчик изменения скорости
+                const speedInput = document.getElementById(`speed-${name}`);
+                speedInput.addEventListener('input', (e) => {
+                    const newSpeed = parseInt(e.target.value);
+                    players[name].speed = newSpeed;
+                    e.target.previousElementSibling.textContent = `${name}: ${newSpeed}`;
+                    
+                    // Если это текущий игрок, можно отправить обновление на сервер
+                    if (name === username && serverConnected) {
+                        socket.emit('player_speed_update', {
+                            name: username,
+                            speed: newSpeed
+                        });
+                    }
+                });
+            });
+        }
+
+        // Управление с клавиатуры
+        document.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                keys[e.key] = true;
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                keys[e.key] = false;
+            }
+        });
+
+        // Функция для уведомления сервера об отключении
+        function notifyDisconnect() {
+            if (!isPageClosing && serverConnected) {
+                isPageClosing = true;
+                
+                // Пытаемся отправить через WebSocket
+                if (socket.connected) {
+                    socket.emit('player_disconnected', { name: username });
+                }
+                
+                // Дублируем через fetch на случай, если WebSocket уже закрыт
+                fetch(`/player_disconnected?name=${encodeURIComponent(username)}`, {
+                    method: 'POST',
+                    keepalive: true
+                }).catch(() => {});
+            }
+        }
+
+        // WebSocket подключение
+        function connectToServer() {
+            socket = io.connect(window.location.origin, {
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+
+            socket.on('connect', () => {
+                serverConnected = true;
+                startTime = Date.now();
+                socket.emit('player_connected', { 
+                    username: username,
+                    x: players[username].x,
+                    y: players[username].y,
+                    speed: players[username].speed
+                });
+            });
+
+            socket.on('disconnect', () => {
+                serverConnected = false;
+                notifyDisconnect();
+            });
+
+            // Обработчики событий страницы
+            window.addEventListener('beforeunload', notifyDisconnect);
+            window.addEventListener('unload', notifyDisconnect);
+            window.addEventListener('pagehide', notifyDisconnect);
+
+            socket.on('players_update', (remotePlayers) => {
+                updateRemotePlayers(remotePlayers);
+                updateSpeedControls(); // Обновляем панель управления при изменении списка игроков
+            });
+
+            socket.on('new_player', (playerData) => {
+                const newPlayerName = playerData.name;
+                
+                if (newPlayerName !== username && !players[newPlayerName] && playerData.host === username) {
+                    players[newPlayerName] = {
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * canvas.height,
+                        size: Math.min(30, window.innerWidth/20),
+                        speed: playerData.speed || 8,
+                        color: getRandomColor(),
+                        keys: []
+                    };
+                    
+                    showMessage(`Новый игрок: ${newPlayerName}`);
+                    socket.emit('request_player_state', { name: newPlayerName });
+                    updateSpeedControls(); // Обновляем панель управления при добавлении нового игрока
+                }
+            });
+
+            socket.on('player_speed_update', (data) => {
+                if (players[data.name]) {
+                    players[data.name].speed = data.speed;
+                    updateSpeedControls(); // Обновляем панель управления при изменении скорости
+                }
+            });
+        }
+
+        // Обновление данных удалённых игроков
+        function updateRemotePlayers(remotePlayers) {
+            Object.keys(players).forEach(name => {
+                if (name !== username && !remotePlayers.some(p => p.name === name)) {
+                    delete players[name];
+                }
+            });
+            
+            remotePlayers.forEach(remotePlayer => {
+                if (remotePlayer.name !== username && players[remotePlayer.name]) {
+                    players[remotePlayer.name].keys = remotePlayer.keys || [];
+                    if (remotePlayer.x !== undefined) players[remotePlayer.name].x = remotePlayer.x;
+                    if (remotePlayer.y !== undefined) players[remotePlayer.name].y = remotePlayer.y;
+                    if (remotePlayer.speed !== undefined) players[remotePlayer.name].speed = remotePlayer.speed;
+                }
+            });
+        }
+
+        function getRandomColor() {
+            const colors = ['#F44336', '#2196F3', '#FFC107', '#9C27B0', '#009688'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function collectLocalInput() {
+            players[username].keys = [];
+            
+            if (keys['ArrowUp']) players[username].keys.push('ArrowUp');
+            if (keys['ArrowDown']) players[username].keys.push('ArrowDown');
+            if (keys['ArrowLeft']) players[username].keys.push('ArrowLeft');
+            if (keys['ArrowRight']) players[username].keys.push('ArrowRight');
+            
+            if (serverConnected) {
+                socket.emit('player_inputs', {
+                    name: username,
+                    keys: players[username].keys,
+                    x: players[username].x,
+                    y: players[username].y,
+                    speed: players[username].speed
+                });
+            }
+        }
+
+        function processGameLogic() {
+            Object.values(players).forEach(player => {
+                const speed = player.speed;
+                
+                player.keys.forEach(key => {
+                    switch(key) {
+                        case 'ArrowUp':
+                            player.y = Math.max(0, player.y - speed);
+                            break;
+                        case 'ArrowDown':
+                            player.y = Math.min(canvas.height - player.size, player.y + speed);
+                            break;
+                        case 'ArrowLeft':
+                            player.x = Math.max(0, player.x - speed);
+                            break;
+                        case 'ArrowRight':
+                            player.x = Math.min(canvas.width - player.size, player.x + speed);
+                            break;
+                    }
+                });
+            });
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            Object.entries(players).forEach(([name, player]) => {
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x, player.y, player.size, player.size);
+                
+                ctx.fillStyle = 'black';
+                ctx.font = '14px Arial';
+                ctx.fillText(name, player.x, player.y - 10);
+            });
+        }
+
+        function showMessage(msg) {
+            messageDisplay.textContent = msg;
+            messageDisplay.style.display = 'block';
+            setTimeout(() => messageDisplay.style.display = 'none', 1500);
+        }
+	
+	function sendGameState() {
+            if (serverConnected) {
+		gameState = players;
+                socket.emit('game_state_update', {
+                    host: username,
+                    state: gameState
+                });
+            }
+        }
+
+        function gameLoop() {
+            if (gameRunning) {
+                collectLocalInput();
+                processGameLogic();
+		sendGameState();
+            }
+	    render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Инициализация игры
+        connectToServer();
+        updateSpeedControls(); // Инициализируем панель управления
+        gameLoop();
+    </script>
+</body>
+</html>
