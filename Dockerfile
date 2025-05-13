@@ -14,4 +14,4 @@ COPY . .
 EXPOSE 1303
 
 # Запускаем Gunicorn, указывая модуль и приложение (app:app)
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:1303", "app:app"]

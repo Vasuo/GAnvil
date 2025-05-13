@@ -1,2 +1,2 @@
-cp flask_app.nginx.conf /etc/nginx/sites-available/flask_app.nginx.conf
-certbot --nginx -d GAnvil.com
+cp flask_app.nginx.conf /etc/nginx/sites-available/ganvil.nginx.conf
+certbot --nginx -d ganvil.silaeder.codingprojects.ru
