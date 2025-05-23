@@ -8,8 +8,8 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, Length, Email, EqualTo, ValidationError
-from werkzeug.security import generate_password_hash, check_password_hash
 from wtforms.fields import TextAreaField
+from werkzeug.security import generate_password_hash, check_password_hash
 from collections import defaultdict
 import time
 import random
@@ -367,6 +367,17 @@ def players_inputs(inputs):
 @socketio.on('game_state_update')
 def game_state_update(data):
     socketio.emit('players_draw', data)
+
+@socketio.on('save_game_speed')
+def handle_save_game_speed(data):
+    game_name = data['game']
+    new_speed = data['speed']
+    # Находим игру в базе данных
+    game = Game.query.filter_by(name=game_name).first()
+    if game:
+        # Обновляем поле code с новым значением скорости
+        game.code = str(new_speed)
+        db.session.commit()
 
 def background_thread():
     """Поток для периодической отправки данных клиенту"""

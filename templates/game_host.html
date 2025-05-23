@@ -68,12 +68,6 @@
         .speed-control input {
             width: 100%;
         }
-        .player-speed-item {
-            margin-bottom: 10px;
-            padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
-        }
         .close-panel {
             position: absolute;
             top: 10px;
@@ -83,6 +77,36 @@
             font-size: 20px;
             cursor: pointer;
         }
+        #save-speed-btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        #save-speed-btn:hover {
+            background-color: #45a049;
+        }
+        #edit-mode-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            padding: 10px 15px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 101;
+        }
+        #edit-mode-btn.active {
+            background-color: #f44336;
+        }
     </style>
 </head>
 <body>
@@ -90,17 +114,36 @@
     <div id="message-display"></div>
     
     <button id="control-panel-btn">☰ Настройки</button>
+    <button id="edit-mode-btn">Режим редактирования</button>
     
     <div id="control-panel">
         <button class="close-panel">×</button>
-        <h2>Управление скоростью</h2>
+        <h2>Управление игрой</h2>
         <div id="speed-controls">
-            <!-- Здесь будут добавляться элементы управления для каждого игрока -->
+            <div class="speed-control">
+                <label for="global-speed">Общая скорость: <span id="speed-value">{{ code }}</span></label>
+                <input type="range" id="global-speed" min="1" max="20" value="{{ code }}">
+            </div>
+            <button id="save-speed-btn">Сохранить скорость</button>
         </div>
     </div>
 
     <script>
         const username = "{{ current_user.username if current_user.is_authenticated else 'Guest' }}";
+        const gameName = "{{ game_name }}";
+        let codeSpeed = parseInt("{{ code }}");
+        
+        // Произвольные стены (без привязки к сетке)
+        let walls = [
+            { x: 175, y: 225, width: 80, height: 120 },
+            { x: 350, y: 275, width: 130, height: 70 },
+            { x: 125, y: 450, width: 60, height: 140 },
+            { x: 525, y: 150, width: 90, height: 180 },
+            { x: 275, y: 525, width: 220, height: 45 },
+            { x: 600, y: 300, width: 75, height: 75 },
+            { x: 50, y: 100, width: 120, height: 30 },
+            { x: 700, y: 400, width: 50, height: 150 }
+        ];
     </script>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
@@ -114,15 +157,14 @@
         const controlPanelBtn = document.getElementById('control-panel-btn');
         const controlPanel = document.getElementById('control-panel');
         const closePanelBtn = document.querySelector('.close-panel');
-        const speedControlsContainer = document.getElementById('speed-controls');
+        const globalSpeedInput = document.getElementById('global-speed');
+        const speedValueDisplay = document.getElementById('speed-value');
+        const saveSpeedBtn = document.getElementById('save-speed-btn');
+        const editModeBtn = document.getElementById('edit-mode-btn');
 
-        // Установка размеров canvas
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
+        // Установка начального значения скорости из шаблона
+        globalSpeedInput.value = codeSpeed;
+        speedValueDisplay.textContent = codeSpeed;
 
         // Состояние игры
         let gameRunning = true;
@@ -131,20 +173,78 @@
         let serverConnected = false;
         let keys = {};
         let isPageClosing = false;
+        let editMode = false;
+        let selectedWall = null;
+        let isDraggingWall = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
 
-        let gameState = [];
+        // Камера
+        let camera = {
+            x: 0,
+            y: 0,
+            width: canvas.width,
+            height: canvas.height,
+            // Функция для центрирования камеры на игроке
+            follow: function(player) {
+                this.x = player.x - this.width / 2 + player.size / 2;
+                this.y = player.y - this.height / 2 + player.size / 2;
+            },
+            // Проверка, находится ли объект в видимой области камеры
+            isVisible: function(x, y, width, height) {
+                return x + width > this.x && 
+                       x < this.x + this.width && 
+                       y + height > this.y && 
+                       y < this.y + this.height;
+            },
+            // Преобразование мировых координат в экранные
+            toScreen: function(x, y) {
+                return {
+                    x: x - this.x,
+                    y: y - this.y
+                };
+            },
+            // Преобразование экранных координат в мировые
+            toWorld: function(x, y) {
+                return {
+                    x: x + this.x,
+                    y: y + this.y
+                };
+            }
+        };
 
         // Игровые объекты
         const players = {
             [username]: {
-                x: 100,
-                y: 100,
-                size: Math.min(30, window.innerWidth/20),
-                speed: 8,
+                x: 50,
+                y: 50,
+                size: 30,
+                speed: codeSpeed,
                 color: '#4CAF50',
                 keys: []
             }
         };
+
+        // Проверка коллизий с блоками
+        function checkWallCollision(x, y, size) {
+            for (const wall of walls) {
+                if (x < wall.x + wall.width &&
+                    x + size > wall.x &&
+                    y < wall.y + wall.height &&
+                    y + size > wall.y) {
+                    return true; // Коллизия обнаружена
+                }
+            }
+            return false; // Коллизии нет
+        }
+
+        // Установка размеров canvas
+        function resizeCanvas() {
+            camera.width = canvas.width = window.innerWidth;
+            camera.height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
 
         // Управление панелью настроек
         controlPanelBtn.addEventListener('click', () => {
@@ -155,51 +255,125 @@
             controlPanel.classList.remove('active');
         });
 
-        // Функция для обновления элементов управления скоростью
-        function updateSpeedControls() {
-            speedControlsContainer.innerHTML = '';
+        // Переключение режима редактирования
+        editModeBtn.addEventListener('click', () => {
+            editMode = !editMode;
+            editModeBtn.classList.toggle('active', editMode);
+            showMessage(editMode ? 'Режим редактирования включен' : 'Режим редактирования выключен');
+        });
+
+        // Обработчик изменения общей скорости
+        globalSpeedInput.addEventListener('input', (e) => {
+            codeSpeed = parseInt(e.target.value);
+            speedValueDisplay.textContent = codeSpeed;
             
-            Object.entries(players).forEach(([name, player]) => {
-                const playerItem = document.createElement('div');
-                playerItem.className = 'player-speed-item';
-                playerItem.innerHTML = `
-                    <div class="speed-control">
-                        <label for="speed-${name}">${name}: ${player.speed}</label>
-                        <input type="range" id="speed-${name}" min="1" max="20" value="${player.speed}" 
-                               data-player="${name}">
-                    </div>
-                `;
-                speedControlsContainer.appendChild(playerItem);
-                
-                // Добавляем обработчик изменения скорости
-                const speedInput = document.getElementById(`speed-${name}`);
-                speedInput.addEventListener('input', (e) => {
-                    const newSpeed = parseInt(e.target.value);
-                    players[name].speed = newSpeed;
-                    e.target.previousElementSibling.textContent = `${name}: ${newSpeed}`;
-                    
-                    // Если это текущий игрок, можно отправить обновление на сервер
-                    if (name === username && serverConnected) {
-                        socket.emit('player_speed_update', {
-                            name: username,
-                            speed: newSpeed
-                        });
-                    }
-                });
+            // Обновляем скорость всех игроков
+            Object.values(players).forEach(player => {
+                player.speed = codeSpeed;
             });
-        }
+            
+            if (serverConnected) {
+                socket.emit('global_speed_update', {
+                    speed: codeSpeed
+                });
+            }
+        });
+
+        // Обработчик кнопки сохранения
+        saveSpeedBtn.addEventListener('click', () => {
+            if (serverConnected) {
+                socket.emit('save_game_speed', {
+                    game: gameName,
+                    speed: codeSpeed
+                });
+                showMessage('Скорость сохранена!');
+            }
+        });
 
         // Управление с клавиатуры
         document.addEventListener('keydown', (e) => {
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(e.key)) {
                 keys[e.key] = true;
                 e.preventDefault();
             }
         });
 
         document.addEventListener('keyup', (e) => {
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(e.key)) {
                 keys[e.key] = false;
+            }
+        });
+
+        // Обработчики событий мыши для редактирования стен
+        canvas.addEventListener('mousedown', (e) => {
+            if (!editMode) return;
+            
+            const mousePos = camera.toWorld(e.clientX, e.clientY);
+            
+            // Проверяем, была ли нажата правая кнопка мыши
+            if (e.button === 2) { // 2 - правая кнопка мыши
+                e.preventDefault();
+                
+                // Проверяем, была ли нажата существующая стена
+                for (let i = walls.length - 1; i >= 0; i--) {
+                    const wall = walls[i];
+                    if (mousePos.x >= wall.x && mousePos.x <= wall.x + wall.width &&
+                        mousePos.y >= wall.y && mousePos.y <= wall.y + wall.height) {
+                        
+                        selectedWall = wall;
+                        isDraggingWall = true;
+                        dragOffsetX = mousePos.x - wall.x;
+                        dragOffsetY = mousePos.y - wall.y;
+                        return;
+                    }
+                }
+                
+                // Если не нажали на существующую стену, создаем новую
+                const newWall = {
+                    x: mousePos.x,
+                    y: mousePos.y,
+                    width: 50,
+                    height: 50
+                };
+                walls.push(newWall);
+                selectedWall = newWall;
+                isDraggingWall = true;
+                dragOffsetX = 0;
+                dragOffsetY = 0;
+                
+                if (serverConnected) {
+                    socket.emit('walls_update', { walls: walls });
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!editMode || !isDraggingWall || !selectedWall) return;
+            
+            const mousePos = camera.toWorld(e.clientX, e.clientY);
+            
+            // Обновляем позицию стены
+            selectedWall.x = mousePos.x - dragOffsetX;
+            selectedWall.y = mousePos.y - dragOffsetY;
+            
+            if (serverConnected) {
+                socket.emit('walls_update', { walls: walls });
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!editMode) return;
+            
+            if (e.button === 2 && isDraggingWall) {
+                isDraggingWall = false;
+                selectedWall = null;
+            }
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            if (editMode) {
+                e.preventDefault();
+                return false;
             }
         });
 
@@ -208,12 +382,10 @@
             if (!isPageClosing && serverConnected) {
                 isPageClosing = true;
                 
-                // Пытаемся отправить через WebSocket
                 if (socket.connected) {
                     socket.emit('player_disconnected', { name: username });
                 }
                 
-                // Дублируем через fetch на случай, если WebSocket уже закрыт
                 fetch(`/player_disconnected?name=${encodeURIComponent(username)}`, {
                     method: 'POST',
                     keepalive: true
@@ -245,14 +417,12 @@
                 notifyDisconnect();
             });
 
-            // Обработчики событий страницы
             window.addEventListener('beforeunload', notifyDisconnect);
             window.addEventListener('unload', notifyDisconnect);
             window.addEventListener('pagehide', notifyDisconnect);
 
             socket.on('players_update', (remotePlayers) => {
                 updateRemotePlayers(remotePlayers);
-                updateSpeedControls(); // Обновляем панель управления при изменении списка игроков
             });
 
             socket.on('new_player', (playerData) => {
@@ -260,25 +430,35 @@
                 
                 if (newPlayerName !== username && !players[newPlayerName] && playerData.host === username) {
                     players[newPlayerName] = {
-                        x: Math.random() * canvas.width,
-                        y: Math.random() * canvas.height,
-                        size: Math.min(30, window.innerWidth/20),
-                        speed: playerData.speed || 8,
+                        x: Math.random() * 2000 - 1000,
+                        y: Math.random() * 2000 - 1000,
+                        size: 30,
+                        speed: codeSpeed,
                         color: getRandomColor(),
                         keys: []
                     };
                     
                     showMessage(`Новый игрок: ${newPlayerName}`);
                     socket.emit('request_player_state', { name: newPlayerName });
-                    updateSpeedControls(); // Обновляем панель управления при добавлении нового игрока
                 }
             });
 
-            socket.on('player_speed_update', (data) => {
-                if (players[data.name]) {
-                    players[data.name].speed = data.speed;
-                    updateSpeedControls(); // Обновляем панель управления при изменении скорости
-                }
+            socket.on('global_speed_update', (data) => {
+                codeSpeed = data.speed;
+                globalSpeedInput.value = codeSpeed;
+                speedValueDisplay.textContent = codeSpeed;
+                
+                Object.values(players).forEach(player => {
+                    player.speed = codeSpeed;
+                });
+            });
+
+            socket.on('speed_saved', (data) => {
+                showMessage(data.message);
+            });
+
+            socket.on('walls_update', (data) => {
+                walls = data.walls;
             });
         }
 
@@ -293,9 +473,6 @@
             remotePlayers.forEach(remotePlayer => {
                 if (remotePlayer.name !== username && players[remotePlayer.name]) {
                     players[remotePlayer.name].keys = remotePlayer.keys || [];
-                    if (remotePlayer.x !== undefined) players[remotePlayer.name].x = remotePlayer.x;
-                    if (remotePlayer.y !== undefined) players[remotePlayer.name].y = remotePlayer.y;
-                    if (remotePlayer.speed !== undefined) players[remotePlayer.name].speed = remotePlayer.speed;
                 }
             });
         }
@@ -308,10 +485,10 @@
         function collectLocalInput() {
             players[username].keys = [];
             
-            if (keys['ArrowUp']) players[username].keys.push('ArrowUp');
-            if (keys['ArrowDown']) players[username].keys.push('ArrowDown');
-            if (keys['ArrowLeft']) players[username].keys.push('ArrowLeft');
-            if (keys['ArrowRight']) players[username].keys.push('ArrowRight');
+            if (keys['ArrowUp'] || keys['w']) players[username].keys.push('ArrowUp');
+            if (keys['ArrowDown'] || keys['s']) players[username].keys.push('ArrowDown');
+            if (keys['ArrowLeft'] || keys['a']) players[username].keys.push('ArrowLeft');
+            if (keys['ArrowRight'] || keys['d']) players[username].keys.push('ArrowRight');
             
             if (serverConnected) {
                 socket.emit('player_inputs', {
@@ -325,39 +502,146 @@
         }
 
         function processGameLogic() {
-            Object.values(players).forEach(player => {
+            // Обрабатываем всех игроков в одном цикле
+            Object.entries(players).forEach(([name, player]) => {
                 const speed = player.speed;
+                const size = player.size;
+                const prevX = player.x;
+                const prevY = player.y;
                 
+                // Временные переменные для проверки коллизий
+                let newX = player.x;
+                let newY = player.y;
+                
+                // Обработка движения игрока
                 player.keys.forEach(key => {
                     switch(key) {
                         case 'ArrowUp':
-                            player.y = Math.max(0, player.y - speed);
+                            newY = player.y - speed;
+                            if (!checkWallCollision(player.x, newY, size)) player.y = newY;
                             break;
                         case 'ArrowDown':
-                            player.y = Math.min(canvas.height - player.size, player.y + speed);
+                            newY = player.y + speed;
+                            if (!checkWallCollision(player.x, newY, size)) player.y = newY;
                             break;
                         case 'ArrowLeft':
-                            player.x = Math.max(0, player.x - speed);
+                            newX = player.x - speed;
+                            if (!checkWallCollision(newX, player.y, size)) player.x = newX;
                             break;
                         case 'ArrowRight':
-                            player.x = Math.min(canvas.width - player.size, player.x + speed);
+                            newX = player.x + speed;
+                            if (!checkWallCollision(newX, player.y, size)) player.x = newX;
                             break;
                     }
                 });
+                
+                // Если это локальный игрок, обновляем камеру
+                if (name === username) {
+                    camera.follow(player);
+                }
             });
         }
 
         function render() {
+            // Очищаем canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            Object.entries(players).forEach(([name, player]) => {
-                ctx.fillStyle = player.color;
-                ctx.fillRect(player.x, player.y, player.size, player.size);
-                
-                ctx.fillStyle = 'black';
-                ctx.font = '14px Arial';
-                ctx.fillText(name, player.x, player.y - 10);
+            // Рисуем стены (произвольной формы)
+            walls.forEach(wall => {
+                if (camera.isVisible(wall.x, wall.y, wall.width, wall.height)) {
+                    const screenPos = camera.toScreen(wall.x, wall.y);
+                    
+                    // Рисуем стену с закругленными углами
+                    ctx.fillStyle = editMode && selectedWall === wall ? '#FF5722' : '#888';
+                    ctx.beginPath();
+                    const radius = 5; // Радиус скругления углов
+                    ctx.roundRect(
+                        screenPos.x, 
+                        screenPos.y, 
+                        wall.width, 
+                        wall.height, 
+                        radius
+                    );
+                    ctx.fill();
+                    
+                    // Границы стен
+                    ctx.strokeStyle = '#555';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Текстура стены (опционально)
+                    ctx.fillStyle = '#999';
+                    for (let i = 0; i < wall.width; i += 10) {
+                        for (let j = 0; j < wall.height; j += 10) {
+                            if ((i + j) % 20 === 0) {
+                                ctx.fillRect(
+                                    screenPos.x + i, 
+                                    screenPos.y + j, 
+                                    5, 
+                                    5
+                                );
+                            }
+                        }
+                    }
+                }
             });
+            
+            // Рисуем игроков
+            Object.entries(players).forEach(([name, player]) => {
+                if (camera.isVisible(player.x, player.y, player.size, player.size)) {
+                    const screenPos = camera.toScreen(player.x, player.y);
+                    
+                    // Рисуем игрока
+                    ctx.fillStyle = player.color;
+                    ctx.fillRect(screenPos.x, screenPos.y, player.size, player.size);
+                    
+                    // Рисуем имя игрока
+                    ctx.fillStyle = 'black';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(name, screenPos.x + player.size/2, screenPos.y - 5);
+                }
+            });
+            
+            // Рисуем сетку мира
+            drawWorldGrid();
+            
+            // В режиме редактирования показываем подсказку
+            if (editMode) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(10, 10, 300, 40);
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText('Правая кнопка мыши: добавить/переместить стену', 20, 35);
+            }
+        }
+        
+        function drawWorldGrid() {
+            const gridSize = 50;
+            const startX = Math.floor(camera.x / gridSize) * gridSize;
+            const startY = Math.floor(camera.y / gridSize) * gridSize;
+            
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            
+            // Вертикальные линии
+            for (let x = startX; x < camera.x + camera.width; x += gridSize) {
+                const screenX = camera.toScreen(x, 0).x;
+                ctx.beginPath();
+                ctx.moveTo(screenX, 0);
+                ctx.lineTo(screenX, camera.height);
+                ctx.stroke();
+            }
+            
+            // Горизонтальные линии
+            for (let y = startY; y < camera.y + camera.height; y += gridSize) {
+                const screenY = camera.toScreen(0, y).y;
+                ctx.beginPath();
+                ctx.moveTo(0, screenY);
+                ctx.lineTo(camera.width, screenY);
+                ctx.stroke();
+            }
         }
 
         function showMessage(msg) {
@@ -366,12 +650,12 @@
             setTimeout(() => messageDisplay.style.display = 'none', 1500);
         }
 	
-	function sendGameState() {
+        function sendGameState() {
             if (serverConnected) {
-		gameState = players;
                 socket.emit('game_state_update', {
                     host: username,
-                    state: gameState
+                    state: players,
+                    walls: walls // Отправляем информацию о стенах другим игрокам
                 });
             }
         }
@@ -380,15 +664,14 @@
             if (gameRunning) {
                 collectLocalInput();
                 processGameLogic();
-		sendGameState();
+                sendGameState();
             }
-	    render();
+            render();
             requestAnimationFrame(gameLoop);
         }
 
         // Инициализация игры
         connectToServer();
-        updateSpeedControls(); // Инициализируем панель управления
         gameLoop();
     </script>
 </body>

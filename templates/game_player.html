@@ -7,24 +7,30 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
             margin: 0;
             padding: 0;
             overflow: hidden;
             background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
         }
-        
-        #game-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
-        }
-        
         canvas {
             display: block;
             background-color: white;
         }
-        
+        #message-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 24px;
+            display: none;
+            z-index: 100;
+            text-align: center;
+        }
         #controls-panel {
             position: absolute;
             bottom: 20px;
@@ -34,181 +40,333 @@
             border-radius: 5px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
         }
-        
         #active-keys {
             display: flex;
             gap: 5px;
             margin-top: 5px;
         }
-        
         .key {
             padding: 5px 10px;
             background-color: #e0e0e0;
             border-radius: 3px;
             font-weight: bold;
         }
-        
         .key.active {
             background-color: #4CAF50;
             color: white;
         }
-        
-        #game-state {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background-color: rgba(255, 255, 255, 0.8);
-            padding: 10px;
-            border-radius: 5px;
-            max-width: 300px;
-            max-height: 80vh;
-            overflow-y: auto;
-            font-family: monospace;
-            white-space: pre-wrap;
+        #connection-status {
+            margin-top: 5px;
         }
     </style>
 </head>
 <body>
-    <div id="game-container">
-        <canvas id="game-canvas"></canvas>
-        
-        <div id="controls-panel">
-            <div>Активные клавиши:</div>
-            <div id="active-keys"></div>
-            <div>Статус: <span id="connection-status">Отключен</span></div>
-        </div>
-        
-        <div id="game-state">
-            <h3>Состояние игры:</h3>
-            <div id="state-content">Ожидание данных...</div>
-        </div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="message-display"></div>
+    
+    <div id="controls-panel">
+        <div>Активные клавиши:</div>
+        <div id="active-keys"></div>
+        <div id="connection-status">Статус: Отключен</div>
     </div>
 
     <script>
-        // Инициализация
-        const canvas = document.getElementById('game-canvas');
+        // Инициализация canvas
+        const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        const playerName = '{{name}}';
-        const hostName = '{{host}}';
+        const messageDisplay = document.getElementById('message-display');
         const activeKeysDisplay = document.getElementById('active-keys');
         const connectionStatus = document.getElementById('connection-status');
-        const stateContent = document.getElementById('state-content');
         
-        // Состояние игры
-        let gameState = {
-            host: hostName,
-            state: {}
+        // Игровые данные
+        const username = '{{ name }}';
+        const host = '{{ host }}';
+        let players = {};
+        let walls = []; // Добавляем массив для хранения стен
+        let keys = {};
+        let socket;
+        let serverConnected = false;
+        
+        // Камера
+        let camera = {
+            x: 0,
+            y: 0,
+            width: canvas.width,
+            height: canvas.height,
+            follow: function(player) {
+                this.x = player.x - this.width / 2 + player.size / 2;
+                this.y = player.y - this.height / 2 + player.size / 2;
+            },
+            isVisible: function(x, y, width, height) {
+                return x + width > this.x && 
+                       x < this.x + this.width && 
+                       y + height > this.y && 
+                       y < this.y + this.height;
+            },
+            toScreen: function(x, y) {
+                return {
+                    x: x - this.x,
+                    y: y - this.y
+                };
+            }
         };
-        
-        // Активные клавиши
-        const activeKeys = new Set();
-        
-        // Настройка canvas
+
+        // Установка размеров canvas
         function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            camera.width = canvas.width = window.innerWidth;
+            camera.height = canvas.height = window.innerHeight;
         }
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
-        
-        // Socket.IO подключение
-        const socket = io({
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000
-        });
-        
-        // Обработчики соединения
-        socket.on('connect', () => {
-            connectionStatus.textContent = "Подключен";
-            connectionStatus.style.color = "green";
-            console.log('Connected to server as', playerName);
-        });
-        
-        socket.on('disconnect', () => {
-            connectionStatus.textContent = "Отключен";
-            connectionStatus.style.color = "red";
-            console.log('Disconnected from server');
-        });
-        
-        // Обработчики клавиатуры
+
+        // Управление с клавиатуры
         document.addEventListener('keydown', (e) => {
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-                if (!activeKeys.has(e.key)) {
-                    activeKeys.add(e.key);
-                    updateKeysDisplay();
-                    sendKeysToServer();
-                }
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(e.key)) {
+                keys[e.key] = true;
+                updateKeysDisplay();
+                sendInputToServer();
                 e.preventDefault();
             }
         });
-        
+
         document.addEventListener('keyup', (e) => {
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
-                activeKeys.delete(e.key);
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(e.key)) {
+                keys[e.key] = false;
                 updateKeysDisplay();
-                sendKeysToServer();
+                sendInputToServer();
             }
         });
-        
+
         // Обновление отображения активных клавиш
         function updateKeysDisplay() {
             activeKeysDisplay.innerHTML = '';
-            activeKeys.forEach(key => {
-                const keyElement = document.createElement('div');
-                keyElement.className = 'key active';
-                keyElement.textContent = key.replace('Arrow', '');
-                activeKeysDisplay.appendChild(keyElement);
+            Object.keys(keys).forEach(key => {
+                if (keys[key]) {
+                    const keyElement = document.createElement('div');
+                    keyElement.className = 'key active';
+                    keyElement.textContent = key.replace('Arrow', '');
+                    activeKeysDisplay.appendChild(keyElement);
+                }
             });
         }
-        
-        // Отправка клавиш на сервер
-        function sendKeysToServer() {
-            const keysArray = Array.from(activeKeys);
-            socket.emit('player_input', {
-                name: playerName,
-                keys: keysArray
-            });
-        }
-        
-        // Обработчик обновления состояния игры
-        socket.on('players_draw', (data) => {
-            if (data.host === hostName) {
-                gameState = data;
-                renderGameState();
-                updateGameDisplay();
+
+        // Отправка ввода на сервер
+        function sendInputToServer() {
+            if (serverConnected) {
+                const keysArray = [];
+                if (keys['ArrowUp'] || keys['w']) keysArray.push('ArrowUp');
+                if (keys['ArrowDown'] || keys['s']) keysArray.push('ArrowDown');
+                if (keys['ArrowLeft'] || keys['a']) keysArray.push('ArrowLeft');
+                if (keys['ArrowRight'] || keys['d']) keysArray.push('ArrowRight');
+                
+                socket.emit('player_input', {
+                    name: username,
+                    keys: keysArray
+                });
             }
-        });
-        
-        // Отображение состояния игры в текстовом виде
-        function renderGameState() {
-            stateContent.textContent = JSON.stringify(gameState, null, 2);
         }
-        
-        // Отрисовка игрового состояния на canvas
-        function updateGameDisplay() {
+
+        // Показать сообщение
+        function showMessage(msg) {
+            messageDisplay.textContent = msg;
+            messageDisplay.style.display = 'block';
+            setTimeout(() => messageDisplay.style.display = 'none', 1500);
+        }
+
+        // WebSocket подключение
+        function connectToServer() {
+            socket = io.connect(window.location.origin, {
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+
+            socket.on('connect', () => {
+                serverConnected = true;
+                connectionStatus.textContent = "Статус: Подключен";
+                connectionStatus.style.color = "green";
+                
+                // Инициализация локального игрока
+                players[username] = {
+                    x: 0,
+                    y: 0,
+                    size: 30,
+                    speed: 5,
+                    color: '#2196F3',
+                    keys: []
+                };
+            });
+
+            socket.on('disconnect', () => {
+                serverConnected = false;
+                connectionStatus.textContent = "Статус: Отключен";
+                connectionStatus.style.color = "red";
+            });
+
+            // Получение обновлений состояния игры
+            socket.on('players_draw', (data) => {
+                if (data.host === host) {
+                    // Обновляем состояние всех игроков
+                    Object.keys(players).forEach(name => {
+                        if (data.state[name]) {
+                            players[name].x = data.state[name].x;
+                            players[name].y = data.state[name].y;
+                            players[name].keys = data.state[name].keys || [];
+                        }
+                    });
+                    
+                    // Добавляем новых игроков
+                    Object.keys(data.state).forEach(name => {
+                        if (!players[name]) {
+                            players[name] = {
+                                x: data.state[name].x,
+                                y: data.state[name].y,
+                                size: 30,
+                                speed: 5,
+                                color: getRandomColor(),
+                                keys: data.state[name].keys || []
+                            };
+                        }
+                    });
+                    
+                    // Удаляем отключившихся игроков
+                    Object.keys(players).forEach(name => {
+                        if (!data.state[name] && name !== username) {
+                            delete players[name];
+                        }
+                    });
+                }
+            });
+
+            // Получение обновлений стен
+            socket.on('walls_update', (data) => {
+                walls = data.walls;
+            });
+
+            // Получение начального состояния стен
+            socket.on('game_state_update', (data) => {
+                if (data.host === host && data.walls) {
+                    walls = data.walls;
+                }
+            });
+
+            socket.on('new_player', (playerData) => {
+                showMessage(`Новый игрок: ${playerData.name}`);
+            });
+        }
+
+        function getRandomColor() {
+            const colors = ['#F44336', '#4CAF50', '#FFC107', '#9C27B0', '#009688'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        // Отрисовка игры
+        function render() {
+            // Очищаем canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // Отрисовка всех игроков
-            Object.entries(gameState.state).forEach(([name, player]) => {
-                // Рисуем игрока
-                ctx.fillStyle = player.color || '#4CAF50';
-                ctx.fillRect(player.x, player.y, player.size || 30, player.size || 30);
-                
-                // Подпись с именем
-                ctx.fillStyle = '#000';
-                ctx.font = '14px Arial';
-                ctx.fillText(name, player.x, player.y - 10);
+            // Рисуем стены
+            walls.forEach(wall => {
+                if (camera.isVisible(wall.x, wall.y, wall.width, wall.height)) {
+                    const screenPos = camera.toScreen(wall.x, wall.y);
+                    
+                    // Рисуем стену с закругленными углами
+                    ctx.fillStyle = '#888';
+                    ctx.beginPath();
+                    const radius = 5; // Радиус скругления углов
+                    ctx.roundRect(
+                        screenPos.x, 
+                        screenPos.y, 
+                        wall.width, 
+                        wall.height, 
+                        radius
+                    );
+                    ctx.fill();
+                    
+                    // Границы стен
+                    ctx.strokeStyle = '#555';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Текстура стены (опционально)
+                    ctx.fillStyle = '#999';
+                    for (let i = 0; i < wall.width; i += 10) {
+                        for (let j = 0; j < wall.height; j += 10) {
+                            if ((i + j) % 20 === 0) {
+                                ctx.fillRect(
+                                    screenPos.x + i, 
+                                    screenPos.y + j, 
+                                    5, 
+                                    5
+                                );
+                            }
+                        }
+                    }
+                }
             });
+            
+            // Рисуем только те объекты, которые находятся в видимой области
+            Object.entries(players).forEach(([name, player]) => {
+                if (camera.isVisible(player.x, player.y, player.size, player.size)) {
+                    const screenPos = camera.toScreen(player.x, player.y);
+                    
+                    // Рисуем игрока
+                    ctx.fillStyle = player.color;
+                    ctx.fillRect(screenPos.x, screenPos.y, player.size, player.size);
+                    
+                    // Рисуем имя игрока
+                    ctx.fillStyle = 'black';
+                    ctx.font = '14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(name, screenPos.x + player.size/2, screenPos.y - 5);
+                }
+            });
+            
+            // Опционально: можно нарисовать сетку или другие элементы мира
+            drawWorldGrid();
         }
         
-        // Обработчик закрытия страницы
-        window.addEventListener('beforeunload', () => {
-            socket.emit('player_disconnected', { name: playerName });
-        });
-        
-        // Начальная отрисовка
-        updateGameDisplay();
+        function drawWorldGrid() {
+            const gridSize = 50;
+            const startX = Math.floor(camera.x / gridSize) * gridSize;
+            const startY = Math.floor(camera.y / gridSize) * gridSize;
+            
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            
+            // Вертикальные линии
+            for (let x = startX; x < camera.x + camera.width; x += gridSize) {
+                const screenX = camera.toScreen(x, 0).x;
+                ctx.beginPath();
+                ctx.moveTo(screenX, 0);
+                ctx.lineTo(screenX, camera.height);
+                ctx.stroke();
+            }
+            
+            // Горизонтальные линии
+            for (let y = startY; y < camera.y + camera.height; y += gridSize) {
+                const screenY = camera.toScreen(0, y).y;
+                ctx.beginPath();
+                ctx.moveTo(0, screenY);
+                ctx.lineTo(camera.width, screenY);
+                ctx.stroke();
+            }
+        }
+
+        // Игровой цикл
+        function gameLoop() {
+            // Центрируем камеру на локальном игроке
+            if (players[username]) {
+                camera.follow(players[username]);
+            }
+            
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Инициализация игры
+        connectToServer();
+        gameLoop();
     </script>
 </body>
 </html>
