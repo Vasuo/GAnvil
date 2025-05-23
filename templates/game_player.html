@@ -82,8 +82,8 @@
         const username = '{{ name }}';
         const host = '{{ host }}';
         let players = {};
-        let walls = []; // Добавляем массив для хранения стен
         let keys = {};
+        let walls = []; // Добавляем массив для хранения стен
         let socket;
         let serverConnected = false;
         
@@ -235,18 +235,11 @@
                             delete players[name];
                         }
                     });
-                }
-            });
-
-            // Получение обновлений стен
-            socket.on('walls_update', (data) => {
-                walls = data.walls;
-            });
-
-            // Получение начального состояния стен
-            socket.on('game_state_update', (data) => {
-                if (data.host === host && data.walls) {
-                    walls = data.walls;
+                    
+                    // Обновляем стены
+                    if (data.walls) {
+                        walls = data.walls;
+                    }
                 }
             });
 
@@ -305,7 +298,7 @@
                 }
             });
             
-            // Рисуем только те объекты, которые находятся в видимой области
+            // Рисуем игроков
             Object.entries(players).forEach(([name, player]) => {
                 if (camera.isVisible(player.x, player.y, player.size, player.size)) {
                     const screenPos = camera.toScreen(player.x, player.y);
@@ -322,7 +315,7 @@
                 }
             });
             
-            // Опционально: можно нарисовать сетку или другие элементы мира
+            // Рисуем сетку мира
             drawWorldGrid();
         }
         
