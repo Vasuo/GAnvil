@@ -11,6 +11,7 @@ from wtforms.validators import DataRequired, Length, Email, EqualTo, ValidationE
 from wtforms.fields import TextAreaField
 from werkzeug.security import generate_password_hash, check_password_hash
 from collections import defaultdict
+import json
 import time
 import random
 
@@ -326,7 +327,22 @@ def start_session(session_id):
 def game_host(game):
     username = current_user.username
     gm = Game.query.filter(Game.name == game).first()
-    return render_template('game_host.html', name=username, game_name=game, code=gm.code)
+    
+    # Преобразуем данные в правильный JSON с двойными кавычками
+    if isinstance(gm.code, dict):
+        game_data = json.dumps(gm.code)
+    else:
+        try:
+            # Пробуем заменить одинарные кавычки на двойные
+            fixed_code = gm.code.replace("'", '"')
+            game_data = fixed_code
+        except Exception as e:
+            game_data = json.dumps({"speed": 5, "walls": [], "players": {}})
+    
+    return render_template('game_host.html', 
+                        name=username, 
+                        game_name=game, 
+                        code=game_data)
 
 @app.route('/game_player/<int:session_id>')
 def game_player(session_id):
@@ -371,12 +387,12 @@ def game_state_update(data):
 @socketio.on('save_game_speed')
 def handle_save_game_speed(data):
     game_name = data['game']
-    new_speed = data['speed']
+    game_code = data['game_code']
     # Находим игру в базе данных
     game = Game.query.filter_by(name=game_name).first()
     if game:
         # Обновляем поле code с новым значением скорости
-        game.code = str(new_speed)
+        game.code = str(game_code)
         db.session.commit()
 
 def background_thread():

@@ -107,6 +107,47 @@
         #edit-mode-btn.active {
             background-color: #f44336;
         }
+        #show-code-btn {
+            position: fixed;
+            top: 70px;
+            left: 20px;
+            padding: 10px 15px;
+            background-color: #673AB7;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 101;
+        }
+        #code-display {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            z-index: 1000;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+            display: none;
+        }
+        #close-code-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body>
@@ -115,6 +156,7 @@
     
     <button id="control-panel-btn">☰ Настройки</button>
     <button id="edit-mode-btn">Режим редактирования</button>
+    <button id="show-code-btn">Показать код игры</button>
     
     <div id="control-panel">
         <button class="close-panel">×</button>
@@ -128,26 +170,52 @@
         </div>
     </div>
 
-    <script>
-        const username = "{{ current_user.username if current_user.is_authenticated else 'Guest' }}";
-        const gameName = "{{ game_name }}";
-        let codeSpeed = parseInt("{{ code }}");
-        
-        // Произвольные стены (без привязки к сетке)
-        let walls = [
-            { x: 175, y: 225, width: 80, height: 120 },
-            { x: 350, y: 275, width: 130, height: 70 },
-            { x: 125, y: 450, width: 60, height: 140 },
-            { x: 525, y: 150, width: 90, height: 180 },
-            { x: 275, y: 525, width: 220, height: 45 },
-            { x: 600, y: 300, width: 75, height: 75 },
-            { x: 50, y: 100, width: 120, height: 30 },
-            { x: 700, y: 400, width: 50, height: 150 }
-        ];
-    </script>
-    
+    <div id="code-display">
+        <button id="close-code-btn">×</button>
+        <h3>Код игры</h3>
+        <pre id="code-content"></pre>
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
     <script>
+    const username = "{{ current_user.username if current_user.is_authenticated else 'Guest' }}";
+    const gameName = "{{ game_name }}";
+    
+    // Функция для преобразования строки с одинарными кавычками в JSON
+    function parseJsonWithSingleQuotes(str) {
+        try {
+            // Сначала пробуем стандартный JSON.parse
+            return JSON.parse(str);
+        } catch (e) {
+            try {
+                // Заменяем одинарные кавычки на двойные и пробуем снова
+                const fixedStr = str.replace(/'/g, '"');
+                return JSON.parse(fixedStr);
+            } catch (e2) {
+                return {
+                    speed: 5,
+                    walls: [],
+                    players: {}
+                };
+            }
+        }
+    }
+
+    // Парсим данные игры
+    const rawCode = `{{ code | safe }}`;
+    
+    let game_code = parseJsonWithSingleQuotes(rawCode);
+    
+    // Гарантируем, что все поля существуют
+    game_code = {
+        speed: game_code.speed || 5,
+        walls: game_code.walls || [],
+        players: game_code.players || {}
+    };
+    
+    let codeSpeed = game_code.speed;
+</script>
+    <script>
+
         // Инициализация canvas
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
@@ -161,10 +229,14 @@
         const speedValueDisplay = document.getElementById('speed-value');
         const saveSpeedBtn = document.getElementById('save-speed-btn');
         const editModeBtn = document.getElementById('edit-mode-btn');
+        const showCodeBtn = document.getElementById('show-code-btn');
+        const codeDisplay = document.getElementById('code-display');
+        const codeContent = document.getElementById('code-content');
+        const closeCodeBtn = document.getElementById('close-code-btn');
 
         // Установка начального значения скорости из шаблона
-        globalSpeedInput.value = codeSpeed;
-        speedValueDisplay.textContent = codeSpeed;
+        globalSpeedInput.value = game_code.speed;
+        speedValueDisplay.textContent = game_code.speed;
 
         // Состояние игры
         let gameRunning = true;
@@ -219,7 +291,7 @@
                 x: 50,
                 y: 50,
                 size: 30,
-                speed: codeSpeed,
+                speed: game_code.speed,
                 color: '#4CAF50',
                 keys: []
             }
@@ -227,7 +299,7 @@
 
         // Проверка коллизий с блоками
         function checkWallCollision(x, y, size) {
-            for (const wall of walls) {
+            for (const wall of game_code.walls) {
                 if (x < wall.x + wall.width &&
                     x + size > wall.x &&
                     y < wall.y + wall.height &&
@@ -262,9 +334,38 @@
             showMessage(editMode ? 'Режим редактирования включен' : 'Режим редактирования выключен');
         });
 
+        // Показать/скрыть код игры
+        showCodeBtn.addEventListener('click', () => {
+            // Обновляем данные перед показом
+            updateGameCode();
+            codeContent.textContent = JSON.stringify(game_code, null, 2);
+            codeDisplay.style.display = 'block';
+        });
+
+        closeCodeBtn.addEventListener('click', () => {
+            codeDisplay.style.display = 'none';
+        });
+
+        function updateGameCode() {
+    // Обновляем только динамические данные (игроки)
+    game_code.players = {};
+    
+    // Копируем данные игроков (без функций и лишних данных)
+    Object.keys(players).forEach(name => {
+        game_code.players[name] = {
+            x: players[name].x,
+            y: players[name].y,
+            size: players[name].size,
+            speed: players[name].speed,
+            color: players[name].color
+        };
+    });
+}
+
         // Обработчик изменения общей скорости
         globalSpeedInput.addEventListener('input', (e) => {
             codeSpeed = parseInt(e.target.value);
+            game_code.speed = codeSpeed;
             speedValueDisplay.textContent = codeSpeed;
             
             // Обновляем скорость всех игроков
@@ -282,9 +383,11 @@
         // Обработчик кнопки сохранения
         saveSpeedBtn.addEventListener('click', () => {
             if (serverConnected) {
+                updateGameCode();
                 socket.emit('save_game_speed', {
                     game: gameName,
-                    speed: codeSpeed
+                    speed: codeSpeed,
+                    game_code: game_code
                 });
                 showMessage('Скорость сохранена!');
             }
@@ -315,8 +418,8 @@
                 e.preventDefault();
                 
                 // Проверяем, была ли нажата существующая стена
-                for (let i = walls.length - 1; i >= 0; i--) {
-                    const wall = walls[i];
+                for (let i = game_code.walls.length - 1; i >= 0; i--) {
+                    const wall = game_code.walls[i];
                     if (mousePos.x >= wall.x && mousePos.x <= wall.x + wall.width &&
                         mousePos.y >= wall.y && mousePos.y <= wall.y + wall.height) {
                         
@@ -335,14 +438,14 @@
                     width: 50,
                     height: 50
                 };
-                walls.push(newWall);
+                game_code.walls.push(newWall);
                 selectedWall = newWall;
                 isDraggingWall = true;
                 dragOffsetX = 0;
                 dragOffsetY = 0;
                 
                 if (serverConnected) {
-                    socket.emit('walls_update', { walls: walls });
+                    socket.emit('walls_update', { walls: game_code.walls });
                 }
             }
         });
@@ -357,7 +460,7 @@
             selectedWall.y = mousePos.y - dragOffsetY;
             
             if (serverConnected) {
-                socket.emit('walls_update', { walls: walls });
+                socket.emit('walls_update', { walls: game_code.walls });
             }
         });
 
@@ -433,7 +536,7 @@
                         x: Math.random() * 2000 - 1000,
                         y: Math.random() * 2000 - 1000,
                         size: 30,
-                        speed: codeSpeed,
+                        speed: game_code.speed,
                         color: getRandomColor(),
                         keys: []
                     };
@@ -445,6 +548,7 @@
 
             socket.on('global_speed_update', (data) => {
                 codeSpeed = data.speed;
+                game_code.speed = codeSpeed;
                 globalSpeedInput.value = codeSpeed;
                 speedValueDisplay.textContent = codeSpeed;
                 
@@ -458,7 +562,7 @@
             });
 
             socket.on('walls_update', (data) => {
-                walls = data.walls;
+                game_code.walls = data.walls;
             });
         }
 
@@ -545,9 +649,8 @@
         function render() {
             // Очищаем canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
             // Рисуем стены (произвольной формы)
-            walls.forEach(wall => {
+            game_code.walls.forEach(wall => {
                 if (camera.isVisible(wall.x, wall.y, wall.width, wall.height)) {
                     const screenPos = camera.toScreen(wall.x, wall.y);
                     
@@ -652,26 +755,26 @@
 	
         function sendGameState() {
             if (serverConnected) {
+                updateGameCode(); // Обновляем game_code перед отправкой
                 socket.emit('game_state_update', {
                     host: username,
                     state: players,
-                    walls: walls // Отправляем информацию о стенах другим игрокам
+                    walls: game_code.walls // Отправляем информацию о стенах другим игрокам
                 });
             }
         }
 
         function gameLoop() {
             if (gameRunning) {
-                collectLocalInput();
+                collectLocalInput();    
                 processGameLogic();
                 sendGameState();
             }
             render();
             requestAnimationFrame(gameLoop);
         }
-
         // Инициализация игры
-        connectToServer();
+        connectToServer();  
         gameLoop();
     </script>
 </body>
