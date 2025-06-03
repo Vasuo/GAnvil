@@ -498,10 +498,12 @@
 
         // WebSocket подключение
         function connectToServer() {
-            socket = io.connect(window.location.origin, {
-                reconnection: true,
-                reconnectionAttempts: 5,
-                reconnectionDelay: 1000
+            const socket = io({
+            transports: ["websocket"], // Принудительно используем WebSocket
+            upgrade: false,           // Отключаем upgrade-проверку
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
             });
 
             socket.on('connect', () => {
